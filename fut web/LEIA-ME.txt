@@ -1,0 +1,15 @@
+VERSAO WEB - SISTEMA DE EVENTOS ESPORTIVOS
+
+Arquivos principais:
+- index.html: painel do organizador/admin
+- evento.html: pagina publica do evento
+- style.css: estilos
+- script.js: regras e funcionamento via LocalStorage
+
+Como usar:
+1. Abra index.html no navegador para criar/gerenciar eventos.
+2. O link publico gerado aponta para evento.html?id=ID_DO_EVENTO.
+3. Para usar autocomplete/mapa do Google Maps, configure a constante GOOGLE_MAPS_API_KEY no inicio do script.js.
+
+Observacao:
+Esta conversao preserva os arquivos web existentes no projeto Android/WebView, removendo apenas a camada Android/Gradle.
