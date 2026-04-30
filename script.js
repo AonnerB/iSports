@@ -11,9 +11,10 @@
   // BANCO DE DADOS ONLINE (Supabase)
   // Sem isso, o sistema usa apenas o navegador/localStorage.
   // Configure estes 2 campos para o mesmo evento aparecer em celulares diferentes.
-  const SUPABASE_URL = "";
-  const SUPABASE_ANON_KEY = "";
+  const SUPABASE_URL = "https://qhlojxlhdupizgdnipkw.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_cu6qAt2UqVEhoctYIO6BJg_KX1kaBF5";
   const SUPABASE_TABLE = "sports_events";
+  const CLOUD_SYNC_INTERVAL_MS = 3000;
 
   let locationAutocomplete = null;
   let selectedLocation = null;
@@ -1537,6 +1538,10 @@
     window.addEventListener("storage", renderAdmin);
     window.addEventListener("events:changed", renderAdmin);
     window.setInterval(renderAdmin, 1000);
+    window.setInterval(async () => {
+      await cloudPullEvents();
+      renderAdmin();
+    }, CLOUD_SYNC_INTERVAL_MS);
     renderAdmin();
   }
 
@@ -1853,6 +1858,10 @@
     window.addEventListener("storage", renderPublic);
     window.addEventListener("events:changed", renderPublic);
     window.setInterval(renderPublic, 2000);
+    window.setInterval(async () => {
+      await cloudPullEvents();
+      renderPublic();
+    }, CLOUD_SYNC_INTERVAL_MS);
     renderPublic();
   }
 

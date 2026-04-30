@@ -13,3 +13,14 @@ Como usar:
 
 Observacao:
 Esta conversao preserva os arquivos web existentes no projeto Android/WebView, removendo apenas a camada Android/Gradle.
+
+
+CORRECAO PARA VERCEL / SINCRONIZACAO
+1. Criar o banco no Supabase usando o arquivo supabase.sql.
+2. No script.js, preencher:
+   const SUPABASE_URL = "https://SEU-PROJETO.supabase.co";
+   const SUPABASE_ANON_KEY = "SUA_CHAVE_ANON_PUBLIC";
+3. Fazer novo deploy no Vercel.
+4. O painel admin e a pagina publica agora consultam o banco a cada 3 segundos para refletir novas confirmacoes.
+
+Sem Supabase configurado, o sistema continuara funcionando apenas no navegador local e nao sincronizara entre celular/publico/admin.
