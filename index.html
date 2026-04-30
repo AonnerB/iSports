@@ -12,7 +12,7 @@
       <span class="eyebrow">Organizador</span>
       <h1>Eventos esportivos</h1>
     </div>
-    <span class="status-pill">Front-end + LocalStorage</span>
+    <span class="status-pill">Banco online opcional</span>
   </header>
 
   <main class="app-shell admin-layout">
@@ -85,9 +85,12 @@
     </section>
 
     <section class="panel" id="adminResult" hidden>
-      <div class="panel-heading">
-        <h2>Evento criado</h2>
-        <p>ID: <strong id="createdEventId"></strong></p>
+      <div class="panel-heading selected-event-heading">
+        <div>
+          <h2>Evento criado</h2>
+          <p>ID: <strong id="createdEventId"></strong></p>
+        </div>
+        <button id="closeEventPanelBtn" class="icon-action" type="button" aria-label="Fechar informações do evento" title="Fechar">×</button>
       </div>
 
       <div class="link-box">
@@ -238,7 +241,7 @@
 
               <div class="score-card" id="matchScoreControls">
                 <div class="score-team">
-                  <span>Time 1</span>
+                  <span id="matchTeamALabel">Time 1</span>
                   <strong id="matchScoreA">0</strong>
                   <div>
                     <button class="secondary-action small-action" type="button" data-score-team="A" data-score-delta="1">+1</button>
@@ -247,7 +250,7 @@
                 </div>
                 <div class="score-target">Limite: <strong id="matchTargetScoreLabel">2</strong></div>
                 <div class="score-team">
-                  <span>Time 2</span>
+                  <span id="matchTeamBLabel">Time 2</span>
                   <strong id="matchScoreB">0</strong>
                   <div>
                     <button class="secondary-action small-action" type="button" data-score-team="B" data-score-delta="1">+1</button>
@@ -265,24 +268,33 @@
     </section>
 
     <section class="panel events-panel">
-      <div class="panel-heading">
-        <h2>Eventos criados</h2>
-        <p>Selecione um evento para acompanhar ou remover.</p>
+      <div class="panel-heading events-heading-actions">
+        <div>
+          <h2>Eventos criados</h2>
+          <p>Toque no evento para abrir os detalhes. A lixeira fica separada para não poluir a tela.</p>
+        </div>
+        <button id="openTrashModalBtn" class="icon-trash-button" type="button" aria-label="Abrir lixeira" title="Abrir lixeira">🗑</button>
       </div>
       <div id="eventsList" class="events-list"></div>
     </section>
 
-    <section class="panel trash-panel">
-      <div class="panel-heading trash-heading">
-        <div>
-          <h2>Lixeira</h2>
-          <p>Eventos removidos ficam aqui por até 5 dias.</p>
+    <dialog id="trashModal" class="app-modal">
+      <div class="modal-card">
+        <div class="modal-heading">
+          <div>
+            <span class="eyebrow">Lixeira</span>
+            <h2>Eventos excluídos</h2>
+          </div>
+          <button class="icon-action" type="button" data-close-modal="trashModal" aria-label="Fechar">×</button>
         </div>
-        <button id="clearTrashBtn" class="danger-action small-action" type="button">Limpar lixeira</button>
+        <p class="field-hint trash-modal-hint">Eventos removidos ficam aqui por até 5 dias. Restaurar não abre o evento automaticamente; toque nele na lista principal para ver os detalhes.</p>
+        <div id="trashList" class="events-list"></div>
+        <div class="trash-modal-actions">
+          <button id="clearTrashBtn" class="danger-action" type="button">Esvaziar lixeira</button>
+        </div>
+        <div id="trashFeedback" class="feedback" role="status" aria-live="polite"></div>
       </div>
-      <div id="trashList" class="events-list"></div>
-      <div id="trashFeedback" class="feedback" role="status" aria-live="polite"></div>
-    </section>
+    </dialog>
   </main>
 
   <script src="script.js"></script>

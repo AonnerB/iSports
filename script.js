@@ -8,6 +8,13 @@
   const ONE_HOUR = 60 * 60 * 1000;
   const GOOGLE_MAPS_API_KEY = "SUA_API_KEY_AQUI";
 
+  // BANCO DE DADOS ONLINE (Supabase)
+  // Sem isso, o sistema usa apenas o navegador/localStorage.
+  // Configure estes 2 campos para o mesmo evento aparecer em celulares diferentes.
+  const SUPABASE_URL = "";
+  const SUPABASE_ANON_KEY = "";
+  const SUPABASE_TABLE = "sports_events";
+
   let locationAutocomplete = null;
   let selectedLocation = null;
   let publicMap = null;
@@ -21,6 +28,107 @@
   const $ = (selector) => document.querySelector(selector);
   const page = document.body.dataset.page;
 
+  function isCloudEnabled() {
+    return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_URL.startsWith("http"));
+  }
+
+  function supabaseEndpoint(path = "") {
+    return `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/${SUPABASE_TABLE}${path}`;
+  }
+
+  async function cloudRequest(path, options = {}) {
+    if (!isCloudEnabled()) return null;
+    const headers = {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    };
+    const response = await fetch(supabaseEndpoint(path), { ...options, headers });
+    if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`);
+    if (response.status === 204) return null;
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  async function cloudPullEvents() {
+    if (!isCloudEnabled()) return;
+    try {
+      const rows = await cloudRequest("?select=id,data,deleted_at&order=updated_at.desc", { method: "GET" });
+      if (!Array.isArray(rows)) return;
+      const events = rows
+        .filter((row) => !row.deleted_at && row.data && typeof row.data === "object")
+        .map((row) => normalizeEvent({ ...row.data, id: row.id || row.data.id }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+    } catch (error) {
+      console.error("Erro ao sincronizar eventos do banco:", error);
+    }
+  }
+
+  async function cloudUpsertEvent(event) {
+    if (!isCloudEnabled() || !event?.id) return;
+    try {
+      await cloudRequest("?on_conflict=id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({ id: event.id, data: event, deleted_at: null, updated_at: new Date().toISOString() })
+      });
+    } catch (error) {
+      console.error("Erro ao salvar evento no banco:", error);
+    }
+  }
+
+  async function cloudPushEvents(events) {
+    if (!isCloudEnabled()) return;
+    await Promise.all((events || []).map((event) => cloudUpsertEvent(normalizeEvent(event))));
+  }
+
+  async function cloudMarkDeleted(eventId) {
+    if (!isCloudEnabled() || !eventId) return;
+    try {
+      await cloudRequest(`?id=eq.${encodeURIComponent(eventId)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      });
+    } catch (error) {
+      console.error("Erro ao excluir evento no banco:", error);
+    }
+  }
+
+  function encodeEventSnapshot(event) {
+    try {
+      const json = JSON.stringify(normalizeEvent(event));
+      return btoa(unescape(encodeURIComponent(json)));
+    } catch (error) {
+      console.error("Erro ao gerar snapshot do evento:", error);
+      return "";
+    }
+  }
+
+  function decodeEventSnapshot(value) {
+    try {
+      if (!value) return null;
+      return normalizeEvent(JSON.parse(decodeURIComponent(escape(atob(value)))));
+    } catch (error) {
+      console.error("Erro ao ler snapshot do evento:", error);
+      return null;
+    }
+  }
+
+  function importEventSnapshotFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const eventId = params.get("id");
+    const snapshot = decodeEventSnapshot(params.get("s"));
+    if (!eventId || !snapshot || snapshot.id !== eventId) return null;
+    const events = loadEvents();
+    if (!events.some((event) => event.id === eventId)) {
+      events.unshift(snapshot);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+    }
+    return snapshot;
+  }
+
   function loadEvents() {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
@@ -33,6 +141,7 @@
 
   function saveEvents(events) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+    cloudPushEvents(events);
     window.dispatchEvent(new Event("events:changed"));
   }
 
@@ -79,6 +188,7 @@
     saveEvents(events);
     saveTrashEvents(trash);
     localStorage.removeItem(LAST_ADMIN_KEY);
+    cloudMarkDeleted(eventId);
     return true;
   }
 
@@ -97,6 +207,7 @@
     saveEvents(events);
     saveTrashEvents(trash);
     localStorage.setItem(LAST_ADMIN_KEY, eventId);
+    cloudUpsertEvent(restoredEvent);
     return true;
   }
 
@@ -273,6 +384,9 @@
   function buildEventLink(eventId) {
     const url = new URL("evento.html", window.location.href);
     url.searchParams.set("id", eventId);
+    const event = getEventById(eventId);
+    const snapshot = event ? encodeEventSnapshot(event) : "";
+    if (snapshot) url.searchParams.set("s", snapshot);
     return url.href;
   }
 
@@ -564,6 +678,27 @@
       .replace(/'/g, "&#039;");
   }
 
+
+  function getFirstName(fullName) {
+    return String(fullName || "").trim().split(/\s+/)[0] || "Jogador";
+  }
+
+  function formatTeamScoreLabel(players, fallback) {
+    if (!Array.isArray(players) || !players.length) return fallback;
+    const names = players.map((player) => getFirstName(player.name || player)).filter(Boolean);
+    if (!names.length) return fallback;
+    const visibleNames = names.slice(0, 4).join(" / ");
+    return names.length > 4 ? `${visibleNames} +${names.length - 4}` : visibleNames;
+  }
+
+  function getMatchTeamLabels(event) {
+    const teams = event?.matchTeams || {};
+    return {
+      teamA: formatTeamScoreLabel(teams.teamA, "Time 1"),
+      teamB: formatTeamScoreLabel(teams.teamB, "Time 2")
+    };
+  }
+
   function getPersonRows(participants) {
     const rows = [];
     participants.forEach((participant) => {
@@ -600,7 +735,7 @@
         ? `<label class="presence-toggle"><input type="checkbox" data-present-person="${participant.id}" ${options.presentIds?.[participant.id] ? "checked" : ""}> No local</label>`
         : "";
       const removeButton = options.showRemoveButton
-        ? `<button class="danger-action" type="button" data-remove-participant="${participant.id}" aria-label="Remover ${escapeHtml(participant.name)}">Remover</button>`
+        ? `<button class="icon-trash-button small-trash" type="button" data-remove-participant="${participant.id}" aria-label="Remover ${escapeHtml(participant.name)}" title="Remover">🗑</button>`
         : "";
 
       const guestsList = guestNames.map((guestName, guestIndex) => {
@@ -609,7 +744,7 @@
           ? `<label class="presence-toggle"><input type="checkbox" data-present-person="${guestKey}" ${options.presentIds?.[guestKey] ? "checked" : ""}> No local</label>`
           : "";
         const removeGuestButton = options.showRemoveGuestButton
-          ? `<button class="danger-action small-action" type="button" data-remove-guest-participant="${participant.id}" data-remove-guest-index="${guestIndex}" aria-label="Remover convidado ${escapeHtml(guestName)}">Remover convidado</button>`
+          ? `<button class="icon-trash-button small-trash" type="button" data-remove-guest-participant="${participant.id}" data-remove-guest-index="${guestIndex}" aria-label="Remover convidado ${escapeHtml(guestName)}" title="Remover convidado">🗑</button>`
           : "";
         return `<div class="person-meta guest-row"><span>↳ ${escapeHtml(guestName)} (Convidado por: ${escapeHtml(participant.name)})</span><div class="person-actions">${guestPresenceToggle}${removeGuestButton}</div></div>`;
       }).join("");
@@ -645,7 +780,7 @@
     const match = event?.match && typeof event.match === "object" ? event.match : {};
     const defaultDuration = isFootballOrFutsal(event?.sport) ? 7 * 60 : 10 * 60;
     const durationSeconds = Math.max(60, Math.floor(Number(match.durationSeconds || defaultDuration)));
-    const targetScore = Math.max(1, Math.floor(Number(match.targetScore || 2)));
+    const targetScore = isFootballOrFutsal(event?.sport) ? 2 : Math.max(1, Math.floor(Number(match.targetScore || 2)));
 
     return {
       enabled: Boolean(match.enabled),
@@ -900,7 +1035,8 @@
     [
       ["#openParticipantsModalBtn", "participantsModal"],
       ["#openTeamsModalBtn", "teamsModal"],
-      ["#openMatchModalBtn", "matchModal"]
+      ["#openMatchModalBtn", "matchModal"],
+      ["#openTrashModalBtn", "trashModal"]
     ].forEach(([buttonSelector, modalId]) => {
       const button = $(buttonSelector);
       if (button) button.addEventListener("click", () => openAdminModal(modalId));
@@ -927,8 +1063,10 @@
         const eventIdToDelete = deleteButton.dataset.deleteEvent;
         const removed = moveEventToTrash(eventIdToDelete);
         if (removed) {
-          if (selectedEventId === eventIdToDelete) selectedEventId = loadEvents()[0]?.id || "";
-          if (selectedEventId) localStorage.setItem(LAST_ADMIN_KEY, selectedEventId);
+          if (selectedEventId === eventIdToDelete) {
+            selectedEventId = "";
+            localStorage.removeItem(LAST_ADMIN_KEY);
+          }
           setFeedback($("#adminFeedback"), "Evento movido para a lixeira.", "success");
           renderAdmin();
         }
@@ -944,13 +1082,21 @@
 
     $("#editEventBtn").addEventListener("click", () => fillFormForEdit(getEventById(selectedEventId)));
 
+    $("#closeEventPanelBtn").addEventListener("click", () => {
+      selectedEventId = "";
+      localStorage.removeItem(LAST_ADMIN_KEY);
+      renderAdmin();
+    });
+
     $("#finishEventBtn").addEventListener("click", () => {
       updateEvent(selectedEventId, (eventToUpdate) => {
         eventToUpdate.status = "concluded";
         eventToUpdate.finishedAt = new Date().toISOString();
         return eventToUpdate;
       });
-      setFeedback($("#adminFeedback"), "Evento concluído e finalizado.", "success");
+      selectedEventId = "";
+      localStorage.removeItem(LAST_ADMIN_KEY);
+      setFeedback($("#adminFeedback"), "Evento concluído e finalizado. O painel foi fechado para manter a tela limpa.", "success");
       renderAdmin();
     });
 
@@ -995,13 +1141,26 @@
       const split = Math.ceil(requestedPlayers / 2);
       const teamA = selectedPlayers.slice(0, split);
       const teamB = selectedPlayers.slice(split);
+      const teamALabel = formatTeamScoreLabel(teamA, "Time 1");
+      const teamBLabel = formatTeamScoreLabel(teamB, "Time 2");
+
+      updateEvent(selectedEventId, (eventToUpdate) => {
+        eventToUpdate.matchTeams = {
+          teamA: teamA.map((person) => ({ key: person.key, name: person.name })),
+          teamB: teamB.map((person) => ({ key: person.key, name: person.name })),
+          waiting: waitingPlayers.map((person) => ({ key: person.key, name: person.name })),
+          generatedAt: new Date().toISOString()
+        };
+        return eventToUpdate;
+      });
 
       $("#teamsResult").innerHTML = `
-        <div class="team-card"><h4>Time 1</h4><ol>${teamA.map((person) => `<li>${escapeHtml(person.name)}</li>`).join("")}</ol></div>
-        <div class="team-card"><h4>Time 2</h4><ol>${teamB.map((person) => `<li>${escapeHtml(person.name)}</li>`).join("")}</ol></div>
+        <div class="team-card"><h4>Time 1 <small>${escapeHtml(teamALabel)}</small></h4><ol>${teamA.map((person) => `<li>${escapeHtml(person.name)}</li>`).join("")}</ol></div>
+        <div class="team-card"><h4>Time 2 <small>${escapeHtml(teamBLabel)}</small></h4><ol>${teamB.map((person) => `<li>${escapeHtml(person.name)}</li>`).join("")}</ol></div>
         <div class="team-card"><h4>Reservas para entrar no time que perder</h4>${waitingPlayers.length ? `<ol>${waitingPlayers.map((person) => `<li>${escapeHtml(person.name)}</li>`).join("")}</ol>` : '<p>Nenhum reserva confirmado além dos jogadores sorteados.</p>'}</div>
       `;
-      setFeedback($("#teamsFeedback"), "Times gerados com base em quem foi marcado como presente no local.", "success");
+      setFeedback($("#teamsFeedback"), "Times gerados. O placar agora usa o primeiro nome dos jogadores.", "success");
+      renderAdmin();
     });
 
     function getMatchConfigFromControls(event) {
@@ -1223,8 +1382,7 @@
       if (!restoreButton) return;
       const restored = restoreEventFromTrash(restoreButton.dataset.restoreEvent);
       if (restored) {
-        selectedEventId = restoreButton.dataset.restoreEvent;
-        setFeedback($("#trashFeedback"), "Evento restaurado.", "success");
+        setFeedback($("#trashFeedback"), "Evento restaurado. Toque no evento na lista principal para abrir os detalhes.", "success");
         renderAdmin();
       }
     });
@@ -1238,7 +1396,10 @@
     function renderAdmin() {
       if (selectedEventId) checkMatchAutoFinish(selectedEventId);
       const events = finalizeExpiredEvents();
-      if (!events.some((event) => event.id === selectedEventId)) selectedEventId = events[0]?.id || "";
+      if (selectedEventId && !events.some((event) => event.id === selectedEventId)) {
+        selectedEventId = "";
+        localStorage.removeItem(LAST_ADMIN_KEY);
+      }
       renderEventsList(events, selectedEventId);
       renderSelectedEvent(events.find((event) => event.id === selectedEventId));
       renderTrashList(purgeExpiredTrashEvents());
@@ -1262,7 +1423,7 @@
               <div class="event-name">${escapeHtml(normalized.name)} <span class="status-mini">${statusText}</span></div>
               <div class="event-meta">${escapeHtml(normalized.sport)} • ${formatDateTime(normalized.startsAt)} • ${totals.totalPeople}/${normalized.maxPeople} pessoas • reserva: ${totals.reservePeople}</div>
             </button>
-            <button class="danger-action small-action" type="button" data-delete-event="${normalized.id}" aria-label="Mover ${escapeHtml(normalized.name)} para a lixeira">Remover evento</button>
+            <button class="icon-trash-button event-trash" type="button" data-delete-event="${normalized.id}" aria-label="Mover ${escapeHtml(normalized.name)} para a lixeira" title="Mover para a lixeira">🗑</button>
           </div>
         `;
       }).join("");
@@ -1318,6 +1479,9 @@
 
       $("#matchTimer").textContent = formatMatchClock(remainingSeconds);
       $("#matchStatus").textContent = getMatchStatusText(match);
+      const teamLabels = getMatchTeamLabels(normalized);
+      $("#matchTeamALabel").textContent = teamLabels.teamA;
+      $("#matchTeamBLabel").textContent = teamLabels.teamB;
       $("#matchScoreA").textContent = String(match.scoreA);
       $("#matchScoreB").textContent = String(match.scoreB);
       $("#matchTargetScoreLabel").textContent = String(match.targetScore);
@@ -1379,6 +1543,7 @@
   function initPublicPage() {
     const params = new URLSearchParams(window.location.search);
     const eventId = params.get("id");
+    importEventSnapshotFromUrl();
     const joinForm = $("#joinForm");
     const hasGuestsInput = $("#hasGuestsInput");
     const guestsBlock = $("#guestsBlock");
@@ -1691,7 +1856,12 @@
     renderPublic();
   }
 
-  if (page === "admin") initAdminPage();
-  if (page === "event") initPublicPage();
-  loadGoogleMapsApi();
+  async function bootstrap() {
+    await cloudPullEvents();
+    if (page === "admin") initAdminPage();
+    if (page === "event") initPublicPage();
+    loadGoogleMapsApi();
+  }
+
+  bootstrap();
 })();

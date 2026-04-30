@@ -1336,3 +1336,219 @@ input {
     align-items: stretch;
   }
 }
+
+
+/* v8 - Mobile limpo + lixeira em modal */
+.events-heading-actions,
+.trash-modal-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.icon-trash-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 1.05rem;
+  line-height: 1;
+  box-shadow: var(--shadow-soft);
+}
+
+.icon-trash-button:hover {
+  background: #ffe4e6;
+  border-color: rgba(220, 38, 38, 0.32);
+  transform: translateY(-1px);
+}
+
+.icon-trash-button.small-trash {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  box-shadow: none;
+  font-size: 0.92rem;
+}
+
+.icon-trash-button.event-trash {
+  align-self: center;
+}
+
+.event-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.event-card .event-item {
+  text-align: left;
+  width: 100%;
+}
+
+.trash-modal-hint {
+  margin: 0 0 12px;
+}
+
+.trash-modal-actions {
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+.match-options .option-card {
+  flex: 1 1 190px;
+}
+
+@media (max-width: 640px) {
+  body { font-size: 13px; }
+
+  .topbar h1 { font-size: 1.75rem; }
+
+  .status-pill { display: none; }
+
+  .app-shell,
+  .topbar {
+    width: min(100% - 16px, 1180px);
+  }
+
+  .admin-layout {
+    gap: 10px;
+  }
+
+  .panel {
+    padding: 11px;
+    border-radius: 16px;
+  }
+
+  .panel-heading h2,
+  .modal-heading h2 {
+    font-size: 1.05rem;
+  }
+
+  .panel-heading p {
+    font-size: 0.78rem;
+  }
+
+  .events-heading-actions {
+    align-items: center;
+  }
+
+  .event-card {
+    grid-template-columns: 1fr auto;
+    padding: 7px;
+    gap: 7px;
+  }
+
+  .event-item {
+    padding: 8px;
+  }
+
+  .event-name,
+  .person-name {
+    font-size: 0.88rem;
+  }
+
+  .event-meta,
+  .person-meta {
+    font-size: 0.74rem;
+    line-height: 1.3;
+  }
+
+  .icon-trash-button {
+    width: 38px;
+    height: 38px;
+    min-height: 38px;
+  }
+
+  .icon-trash-button.event-trash {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .people-list li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 8px;
+  }
+
+  .person-actions {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .person-actions .presence-toggle {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .modal-shortcuts,
+  .event-management-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .modal-shortcuts button,
+  .event-management-actions button {
+    width: 100%;
+  }
+
+  .match-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .match-actions button,
+  .match-options .option-card {
+    width: 100%;
+  }
+
+  .trash-modal-actions .danger-action {
+    width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .modal-shortcuts,
+  .event-management-actions,
+  .match-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.selected-event-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.team-card h4 small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.score-team span {
+  display: block;
+  max-width: 180px;
+  margin: 0 auto;
+  overflow-wrap: anywhere;
+}
