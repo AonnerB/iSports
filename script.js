@@ -6,7 +6,7 @@
   const TRASH_RETENTION_DAYS = 5;
   const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   const ONE_HOUR = 60 * 60 * 1000;
-  const GOOGLE_MAPS_API_KEY = "SUA_API_KEY_AQUI";
+  const GOOGLE_MAPS_API_KEY = "AIzaSyDALywydQ0mxFw5oTjqgiPZ6ye7wrtzY7E"; // Cole aqui a sua chave do Google Maps
 
   // BANCO DE DADOS ONLINE (Supabase)
   // Sem isso, o sistema usa apenas o navegador/localStorage.
@@ -260,6 +260,11 @@
     return Number(String(value || "").replace(",", "."));
   }
 
+  function toCoordinate(value) {
+    if (value === null || value === undefined || String(value).trim() === "") return NaN;
+    return Number(String(value).replace(",", "."));
+  }
+
   function getGuestNames(participant) {
     if (Array.isArray(participant.guests)) {
       return participant.guests.map((guest) => String(guest).trim()).filter(Boolean);
@@ -449,7 +454,7 @@
     if (document.querySelector("[data-google-maps-api]")) return;
 
     const script = document.createElement("script");
-    script.src = "https://maps.googleapis.com/maps/api/js?key=" + encodeURIComponent(GOOGLE_MAPS_API_KEY) + "&libraries=places&callback=initGoogleMapsIntegration";
+    script.src = "https://maps.googleapis.com/maps/api/js?key=" + encodeURIComponent(GOOGLE_MAPS_API_KEY) + "&libraries=places&callback=initGoogleMapsIntegration&language=pt-BR&region=BR";
     script.async = true;
     script.defer = true;
     script.dataset.googleMapsApi = "true";
@@ -462,11 +467,11 @@
     if (typeof location === "string") {
       return {
         local: location,
-        lat: Number(event.locationLat || event.lat || null),
-        lng: Number(event.locationLng || event.lng || null)
+        lat: toCoordinate(event.locationLat || event.lat),
+        lng: toCoordinate(event.locationLng || event.lng)
       };
     }
-    return { local: String(location.local || location.address || ""), lat: Number(location.lat), lng: Number(location.lng) };
+    return { local: String(location.local || location.address || ""), lat: toCoordinate(location.lat), lng: toCoordinate(location.lng) };
   }
 
   function hasValidCoordinates(location) {
@@ -942,8 +947,8 @@
       const maxPeople = Math.floor(toNumber(data.get("maxPeople")));
       const location = selectedLocation || {
         local: String(data.get("location")).trim(),
-        lat: toNumber(data.get("locationLat")),
-        lng: toNumber(data.get("locationLng"))
+        lat: toCoordinate(data.get("locationLat")),
+        lng: toCoordinate(data.get("locationLng"))
       };
 
       if (!editingEventId && !isFutureDate(startsAt)) {
@@ -957,7 +962,7 @@
       }
 
       if (!location.local || !hasValidCoordinates(location)) {
-        setFeedback($("#adminFeedback"), "Digite e selecione um local válido nas sugestões do Google Maps.", "error");
+        setFeedback($("#adminFeedback"), "Digite o local e selecione uma sugestão do Google Maps antes de salvar.", "error");
         return;
       }
 

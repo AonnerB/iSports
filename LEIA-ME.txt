@@ -24,3 +24,17 @@ CORRECAO PARA VERCEL / SINCRONIZACAO
 4. O painel admin e a pagina publica agora consultam o banco a cada 3 segundos para refletir novas confirmacoes.
 
 Sem Supabase configurado, o sistema continuara funcionando apenas no navegador local e nao sincronizara entre celular/publico/admin.
+
+GOOGLE MAPS - LOCAL DO EVENTO
+1. No Google Cloud, ative no mesmo projeto:
+   - Maps JavaScript API
+   - Places API ou Places API (New), conforme disponível na sua conta
+2. Crie uma API Key e restrinja por domínio, por exemplo:
+   - http://localhost/* para teste local
+   - https://SEU-DOMINIO.vercel.app/* para produção
+3. No arquivo script.js, troque:
+   const GOOGLE_MAPS_API_KEY = "SUA_API_KEY_AQUI";
+   pela sua chave real.
+4. Ao criar evento, digite no campo Local do evento e selecione uma sugestão do Google Maps.
+5. O sistema salva endereço + latitude + longitude.
+6. Na página pública, o local fica oculto até a confirmação da presença. Depois da confirmação, mostra endereço, mapa e botão Abrir no Google Maps.
