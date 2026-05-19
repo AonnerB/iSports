@@ -6,8 +6,6 @@
   const TRASH_RETENTION_DAYS = 5;
   const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   const ONE_HOUR = 60 * 60 * 1000;
-  const GOOGLE_MAPS_API_KEY = "AIzaSyDALywydQ0mxFw5oTjqgiPZ6ye7wrtzY7E"; // Cole aqui a sua chave do Google Maps
-
   // BANCO DE DADOS ONLINE (Supabase)
   // Sem isso, o sistema usa apenas o navegador/localStorage.
   // Configure estes 2 campos para o mesmo evento aparecer em celulares diferentes.
@@ -16,7 +14,8 @@
   const SUPABASE_TABLE = "sports_events";
   const CLOUD_SYNC_INTERVAL_MS = 3000;
 
-  let locationAutocomplete = null;
+  let locationSearchTimer = null;
+  let activeLocationSearchRequest = 0;
   let selectedLocation = null;
   let publicMap = null;
   let publicMarker = null;
@@ -440,27 +439,6 @@
     return !shouldAutoConcludeEvent(event) && normalizeEvent(event).status !== "concluded";
   }
 
-  function loadGoogleMapsApi() {
-    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === "SUA_API_KEY_AQUI") {
-      console.warn("Configure a GOOGLE_MAPS_API_KEY no script.js para ativar o autocomplete e o mapa.");
-      return;
-    }
-
-    if (window.google?.maps?.places) {
-      window.initGoogleMapsIntegration();
-      return;
-    }
-
-    if (document.querySelector("[data-google-maps-api]")) return;
-
-    const script = document.createElement("script");
-    script.src = "https://maps.googleapis.com/maps/api/js?key=" + encodeURIComponent(GOOGLE_MAPS_API_KEY) + "&libraries=places&callback=initGoogleMapsIntegration&language=pt-BR&region=BR";
-    script.async = true;
-    script.defer = true;
-    script.dataset.googleMapsApi = "true";
-    document.head.appendChild(script);
-  }
-
   function getEventLocation(event) {
     const location = event?.location;
     if (!location) return { local: "", lat: null, lng: null };
@@ -478,44 +456,104 @@
     return Number.isFinite(location.lat) && Number.isFinite(location.lng);
   }
 
-  function buildGoogleMapsUrl(location) {
-    if (hasValidCoordinates(location)) return "https://www.google.com/maps/search/?api=1&query=" + location.lat + "," + location.lng;
-    return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(location.local);
+  function buildMapUrl(location) {
+    if (hasValidCoordinates(location)) return "https://www.openstreetmap.org/?mlat=" + location.lat + "&mlon=" + location.lng + "#map=17/" + location.lat + "/" + location.lng;
+    return "https://www.openstreetmap.org/search?query=" + encodeURIComponent(location.local);
+  }
+
+  function getLocationDisplayName(item) {
+    const name = item?.display_name || "";
+    return name.replace(/, Brasil$/i, "");
+  }
+
+  async function searchOpenStreetMapLocations(query) {
+    const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&countrycodes=br&q=" + encodeURIComponent(query);
+    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error("Falha ao buscar local no OpenStreetMap.");
+    return response.json();
+  }
+
+  function renderLocationSuggestions(items) {
+    const box = $("#locationSuggestions");
+    const input = $("#locationInput");
+    const latInput = $("#locationLatInput");
+    const lngInput = $("#locationLngInput");
+    if (!box || !input || !latInput || !lngInput) return;
+
+    box.innerHTML = "";
+    if (!Array.isArray(items) || !items.length) {
+      box.hidden = true;
+      return;
+    }
+
+    items.forEach((item) => {
+      const lat = toCoordinate(item.lat);
+      const lng = toCoordinate(item.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      const label = getLocationDisplayName(item);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "location-suggestion";
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        selectedLocation = { local: label, lat, lng };
+        input.value = label;
+        latInput.value = String(lat);
+        lngInput.value = String(lng);
+        box.hidden = true;
+      });
+      box.appendChild(button);
+    });
+
+    box.hidden = !box.children.length;
   }
 
   function initLocationAutocomplete() {
     const input = $("#locationInput");
     const latInput = $("#locationLatInput");
     const lngInput = $("#locationLngInput");
-    if (!input || !window.google?.maps?.places || locationAutocomplete) return;
-
-    locationAutocomplete = new google.maps.places.Autocomplete(input, {
-      fields: ["formatted_address", "geometry", "name"],
-      types: ["geocode", "establishment"]
-    });
-
-    locationAutocomplete.addListener("place_changed", () => {
-      const place = locationAutocomplete.getPlace();
-      if (!place.geometry?.location) {
-        selectedLocation = null;
-        latInput.value = "";
-        lngInput.value = "";
-        return;
-      }
-
-      const lat = place.geometry.location.lat();
-      const lng = place.geometry.location.lng();
-      const local = place.formatted_address || place.name || input.value.trim();
-      selectedLocation = { local, lat, lng };
-      input.value = local;
-      latInput.value = String(lat);
-      lngInput.value = String(lng);
-    });
+    const suggestions = $("#locationSuggestions");
+    if (!input || input.dataset.locationSearchReady === "true") return;
+    input.dataset.locationSearchReady = "true";
 
     input.addEventListener("input", () => {
       selectedLocation = null;
-      latInput.value = "";
-      lngInput.value = "";
+      if (latInput) latInput.value = "";
+      if (lngInput) lngInput.value = "";
+      if (locationSearchTimer) window.clearTimeout(locationSearchTimer);
+
+      const query = input.value.trim();
+      if (!suggestions || query.length < 3) {
+        if (suggestions) suggestions.hidden = true;
+        return;
+      }
+
+      locationSearchTimer = window.setTimeout(async () => {
+        const requestId = ++activeLocationSearchRequest;
+        suggestions.hidden = false;
+        suggestions.innerHTML = '<div class="location-search-status">Buscando locais...</div>';
+        try {
+          const results = await searchOpenStreetMapLocations(query);
+          if (requestId !== activeLocationSearchRequest) return;
+          renderLocationSuggestions(results);
+          if (!results.length) suggestions.innerHTML = '<div class="location-search-status">Nenhum local encontrado.</div>';
+        } catch (error) {
+          console.error("Erro ao buscar local:", error);
+          if (requestId !== activeLocationSearchRequest) return;
+          suggestions.innerHTML = '<div class="location-search-status">Não foi possível buscar o local agora.</div>';
+        }
+      }, 450);
+    });
+
+    input.addEventListener("blur", () => {
+      window.setTimeout(() => {
+        if (suggestions) suggestions.hidden = true;
+      }, 180);
+    });
+
+    input.addEventListener("focus", () => {
+      if (suggestions && suggestions.children.length && !selectedLocation) suggestions.hidden = false;
     });
   }
 
@@ -527,34 +565,37 @@
     if (!hasValidCoordinates(location)) {
       mapElement.innerHTML = "";
       currentMapKey = "";
+      if (publicMap) {
+        publicMap.remove();
+        publicMap = null;
+      }
       return;
     }
 
-    if (!window.google?.maps) {
+    if (!window.L) {
       pendingMapEvent = event;
+      mapElement.innerHTML = '<div class="location-search-status">Mapa indisponível. Verifique se o Leaflet carregou.</div>';
       return;
     }
 
     const mapKey = location.lat + "," + location.lng;
-    if (currentMapKey === mapKey && publicMap && publicMarker) return;
+    if (currentMapKey === mapKey && publicMap && publicMarker) {
+      window.setTimeout(() => publicMap.invalidateSize(), 80);
+      return;
+    }
     currentMapKey = mapKey;
 
-    const position = { lat: location.lat, lng: location.lng };
-    publicMap = new google.maps.Map(mapElement, {
-      center: position,
-      zoom: 16,
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: true
-    });
+    if (publicMap) publicMap.remove();
+    mapElement.innerHTML = "";
 
-    publicMarker = new google.maps.Marker({ position, map: publicMap, title: location.local });
+    publicMap = L.map(mapElement, { scrollWheelZoom: false }).setView([location.lat, location.lng], 16);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+    }).addTo(publicMap);
+    publicMarker = L.marker([location.lat, location.lng]).addTo(publicMap).bindPopup(location.local);
+    window.setTimeout(() => publicMap.invalidateSize(), 120);
   }
-
-  window.initGoogleMapsIntegration = function () {
-    initLocationAutocomplete();
-    if (pendingMapEvent) renderPublicEventMap(pendingMapEvent);
-  };
 
   function removeParticipantFromEvent(eventId, participantId, options = {}) {
     const event = getEventById(eventId);
@@ -962,7 +1003,7 @@
       }
 
       if (!location.local || !hasValidCoordinates(location)) {
-        setFeedback($("#adminFeedback"), "Digite o local e selecione uma sugestão do Google Maps antes de salvar.", "error");
+        setFeedback($("#adminFeedback"), "Digite o local e selecione uma sugestão do OpenStreetMap antes de salvar.", "error");
         return;
       }
 
@@ -1826,7 +1867,7 @@
       $("#releasedLocation").hidden = !hasJoined || !hasLocation;
       $("#publicLocation").textContent = hasJoined && hasLocation ? location.local : "";
       const mapsButton = $("#openGoogleMapsBtn");
-      if (mapsButton && hasLocation) mapsButton.href = buildGoogleMapsUrl(location);
+      if (mapsButton && hasLocation) mapsButton.href = buildMapUrl(location);
       if (hasJoined && hasLocation && hasValidCoordinates(location)) renderPublicEventMap(normalized);
 
       $("#joinPanel").hidden = hasJoined || !active;
@@ -1874,7 +1915,7 @@
     await cloudPullEvents();
     if (page === "admin") initAdminPage();
     if (page === "event") initPublicPage();
-    loadGoogleMapsApi();
+    initLocationAutocomplete();
   }
 
   bootstrap();

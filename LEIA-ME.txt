@@ -4,16 +4,16 @@ Arquivos principais:
 - index.html: painel do organizador/admin
 - evento.html: pagina publica do evento
 - style.css: estilos
-- script.js: regras e funcionamento via LocalStorage
+- script.js: regras e funcionamento via LocalStorage/Supabase
 
 Como usar:
 1. Abra index.html no navegador para criar/gerenciar eventos.
 2. O link publico gerado aponta para evento.html?id=ID_DO_EVENTO.
-3. Para usar autocomplete/mapa do Google Maps, configure a constante GOOGLE_MAPS_API_KEY no inicio do script.js.
+3. O campo Local do evento usa OpenStreetMap/Nominatim para buscar o local sem chave de API do Google.
+4. A pagina publica usa Leaflet + OpenStreetMap para exibir o mapa apos a confirmacao da presenca.
 
 Observacao:
-Esta conversao preserva os arquivos web existentes no projeto Android/WebView, removendo apenas a camada Android/Gradle.
-
+Esta versao remove a dependencia do Google Maps API e nao precisa de billing do Google Cloud.
 
 CORRECAO PARA VERCEL / SINCRONIZACAO
 1. Criar o banco no Supabase usando o arquivo supabase.sql.
@@ -21,20 +21,17 @@ CORRECAO PARA VERCEL / SINCRONIZACAO
    const SUPABASE_URL = "https://SEU-PROJETO.supabase.co";
    const SUPABASE_ANON_KEY = "SUA_CHAVE_ANON_PUBLIC";
 3. Fazer novo deploy no Vercel.
-4. O painel admin e a pagina publica agora consultam o banco a cada 3 segundos para refletir novas confirmacoes.
+4. O painel admin e a pagina publica consultam o banco a cada 3 segundos para refletir novas confirmacoes.
 
 Sem Supabase configurado, o sistema continuara funcionando apenas no navegador local e nao sincronizara entre celular/publico/admin.
 
-GOOGLE MAPS - LOCAL DO EVENTO
-1. No Google Cloud, ative no mesmo projeto:
-   - Maps JavaScript API
-   - Places API ou Places API (New), conforme disponível na sua conta
-2. Crie uma API Key e restrinja por domínio, por exemplo:
-   - http://localhost/* para teste local
-   - https://SEU-DOMINIO.vercel.app/* para produção
-3. No arquivo script.js, troque:
-   const GOOGLE_MAPS_API_KEY = "SUA_API_KEY_AQUI";
-   pela sua chave real.
-4. Ao criar evento, digite no campo Local do evento e selecione uma sugestão do Google Maps.
-5. O sistema salva endereço + latitude + longitude.
-6. Na página pública, o local fica oculto até a confirmação da presença. Depois da confirmação, mostra endereço, mapa e botão Abrir no Google Maps.
+LOCAL DO EVENTO - OPENSTREETMAP
+1. Nao precisa criar API key.
+2. Ao criar evento, digite no campo Local do evento.
+3. Selecione uma sugestao retornada pelo OpenStreetMap.
+4. O sistema salva endereco + latitude + longitude.
+5. Na pagina publica, o local fica oculto ate a confirmacao da presenca.
+6. Depois da confirmacao, mostra endereco, mapa e botao Abrir no OpenStreetMap.
+
+Importante:
+O Nominatim publico do OpenStreetMap e indicado para baixo volume/testes. Para alto volume, use um provedor proprio ou contratado de geocoding.

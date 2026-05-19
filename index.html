@@ -74,7 +74,8 @@
           >
           <input type="hidden" name="locationLat" id="locationLatInput">
           <input type="hidden" name="locationLng" id="locationLngInput">
-          <small class="field-hint">Selecione uma sugestão do Google Maps para salvar o endereço com latitude e longitude.</small>
+          <div id="locationSuggestions" class="location-suggestions" hidden></div>
+          <small class="field-hint">Digite o local e selecione uma sugestão do OpenStreetMap para salvar o endereço com latitude e longitude.</small>
         </label>
 
         <button id="saveEventBtn" class="primary-action full-span" type="submit">Criar evento</button>
