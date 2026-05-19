@@ -471,25 +471,73 @@
     return digits.length === 8 ? digits : "";
   }
 
-  function buildAddressFromViaCep(data) {
-    if (!data || data.erro) return "";
+  function extractCep(value) {
+    const match = String(value || "").match(/\b\d{5}-?\d{3}\b/);
+    return match ? match[0].replace(/\D/g, "") : "";
+  }
+
+  function extractStreetCandidate(value) {
+    const withoutCep = String(value || "").replace(/\b\d{5}-?\d{3}\b/g, "").trim();
+    const firstPart = withoutCep.split(",")[0].trim();
+    return firstPart.length >= 3 ? firstPart : withoutCep;
+  }
+
+  function buildAddressFromCepData(data, overrideStreet = "") {
+    if (!data) return "";
     return [
-      data.logradouro,
-      data.bairro,
-      data.localidade,
-      data.uf,
-      data.cep,
+      overrideStreet || data.logradouro || data.street,
+      data.bairro || data.neighborhood,
+      data.localidade || data.city,
+      data.uf || data.state,
+      data.cep || data.postcode,
       "Brasil"
     ].filter(Boolean).join(", ");
   }
 
-  async function fetchViaCepAddress(query) {
-    const cep = normalizeCep(query);
-    if (!cep) return "";
+  async function fetchViaCepData(query) {
+    const cep = normalizeCep(query) || extractCep(query);
+    if (!cep) return null;
     const response = await fetch("https://viacep.com.br/ws/" + cep + "/json/", { headers: { Accept: "application/json" } });
-    if (!response.ok) return "";
+    if (!response.ok) return null;
     const data = await response.json();
-    return buildAddressFromViaCep(data);
+    if (!data || data.erro) return null;
+    return {
+      cep: data.cep || cep,
+      logradouro: data.logradouro || "",
+      bairro: data.bairro || "",
+      localidade: data.localidade || "",
+      uf: data.uf || ""
+    };
+  }
+
+  async function fetchBrasilApiCepData(query) {
+    const cep = normalizeCep(query) || extractCep(query);
+    if (!cep) return null;
+    try {
+      const response = await fetch("https://brasilapi.com.br/api/cep/v2/" + cep, { headers: { Accept: "application/json" } });
+      if (!response.ok) return null;
+      const data = await response.json();
+      const coords = data.location && data.location.coordinates ? data.location.coordinates : {};
+      return {
+        cep: data.cep || cep,
+        logradouro: data.street || "",
+        bairro: data.neighborhood || "",
+        localidade: data.city || "",
+        uf: data.state || "",
+        lat: toCoordinate(coords.latitude),
+        lon: toCoordinate(coords.longitude)
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async function fetchCepLocationData(query) {
+    const [viaCep, brasilApi] = await Promise.all([
+      fetchViaCepData(query).catch(() => null),
+      fetchBrasilApiCepData(query).catch(() => null)
+    ]);
+    return { viaCep, brasilApi, data: brasilApi || viaCep };
   }
 
   async function searchNominatim(query, options = {}) {
@@ -550,42 +598,119 @@
     });
   }
 
+  function getCodeStreetToken(value) {
+    const match = String(value || "").toLowerCase().match(/\b([a-z])\s*-?\s*(\d{1,4})\b/);
+    return match ? match[1] + "-" + match[2] : "";
+  }
+
+  function scoreLocationResult(item, originalQuery, cepData) {
+    const label = getLocationDisplayName(item).toLowerCase();
+    const query = String(originalQuery || "").toLowerCase();
+    let score = 0;
+
+    const queryToken = getCodeStreetToken(query);
+    if (queryToken) {
+      const looseToken = queryToken.replace("-", "");
+      const normalizedLabel = label.replace(/[\s-]/g, "");
+      if (label.includes(queryToken) || normalizedLabel.includes(looseToken)) score += 120;
+      else score -= 80;
+    }
+
+    const streetCandidate = extractStreetCandidate(originalQuery).toLowerCase();
+    if (streetCandidate && label.includes(streetCandidate)) score += 60;
+    if (cepData?.localidade && label.includes(String(cepData.localidade).toLowerCase())) score += 30;
+    if (cepData?.uf && label.includes(String(cepData.uf).toLowerCase())) score += 10;
+    if (cepData?.bairro && label.includes(String(cepData.bairro).toLowerCase())) score += 20;
+    if (item.source === "OpenStreetMap") score += 10;
+    if (item.source === "Photon") score += 5;
+    return score;
+  }
+
+  function buildSearchQueries(cleanQuery, cepData) {
+    const queries = [];
+    const add = (value) => {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      if (text && !queries.some((item) => item.toLowerCase() === text.toLowerCase())) queries.push(text);
+    };
+
+    const streetCandidate = extractStreetCandidate(cleanQuery);
+    const cepAddress = buildAddressFromCepData(cepData);
+    const cepAddressWithTypedStreet = buildAddressFromCepData(cepData, streetCandidate);
+
+    add(cleanQuery);
+    if (cepData?.localidade && cepData?.uf) {
+      add([streetCandidate, cepData.bairro, cepData.localidade, cepData.uf, "Brasil"].filter(Boolean).join(", "));
+      add([streetCandidate, cepData.localidade, cepData.uf, "Brasil"].filter(Boolean).join(", "));
+      add([cleanQuery, cepData.localidade, cepData.uf, "Brasil"].filter(Boolean).join(", "));
+    }
+    add(cepAddressWithTypedStreet);
+    add(cepAddress);
+    if (!/brasil/i.test(cleanQuery)) add(cleanQuery + ", Brasil");
+
+    const codeToken = getCodeStreetToken(cleanQuery);
+    if (codeToken && cepData?.localidade && cepData?.uf) {
+      add([codeToken, cepData.localidade, cepData.uf, "Brasil"].join(", "));
+      add([codeToken.replace("-", " "), cepData.localidade, cepData.uf, "Brasil"].join(", "));
+    }
+
+    return queries;
+  }
+
+  function createTypedApproximationResult(cleanQuery, sourceResult, cepData) {
+    const lat = toCoordinate(cepData?.lat) || toCoordinate(sourceResult?.lat);
+    const lon = toCoordinate(cepData?.lon) || toCoordinate(sourceResult?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    const cityInfo = [cepData?.bairro, cepData?.localidade, cepData?.uf].filter(Boolean).join(", ");
+    return {
+      display_name: "Usar endereço digitado: " + cleanQuery + (cityInfo ? " — mapa aproximado por " + cityInfo : " — mapa aproximado"),
+      original_label: cleanQuery,
+      lat,
+      lon,
+      source: "Digitado",
+      approximate: true
+    };
+  }
+
   async function searchOpenStreetMapLocations(query) {
     const cleanQuery = String(query || "").trim();
     if (!cleanQuery) return [];
 
-    const cepAddress = await fetchViaCepAddress(cleanQuery);
-    const queries = [
-      cleanQuery,
-      cepAddress,
-      cleanQuery.includes("Brasil") ? "" : cleanQuery + ", Brasil"
-    ].filter(Boolean);
-
+    const cepLookup = await fetchCepLocationData(cleanQuery);
+    const cepData = cepLookup.data;
+    const queries = buildSearchQueries(cleanQuery, cepData);
     const results = [];
 
     for (const searchQuery of queries) {
-      const brResults = await searchNominatim(searchQuery, { countryCodes: "br", limit: 8 });
+      const brResults = await searchNominatim(searchQuery, { countryCodes: "br", limit: 10 });
       results.push(...brResults);
-      if (results.length >= 6) break;
+      if (results.length >= 12) break;
     }
 
-    if (results.length < 3) {
+    if (results.length < 5) {
       for (const searchQuery of queries) {
-        const globalResults = await searchNominatim(searchQuery, { limit: 8 });
+        const globalResults = await searchNominatim(searchQuery, { limit: 10 });
         results.push(...globalResults);
-        if (results.length >= 6) break;
+        if (results.length >= 12) break;
       }
     }
 
-    if (results.length < 3) {
+    if (results.length < 5) {
       for (const searchQuery of queries) {
         const photonResults = await searchPhoton(searchQuery);
         results.push(...photonResults);
-        if (results.length >= 6) break;
+        if (results.length >= 12) break;
       }
     }
 
-    return dedupeLocationResults(results).slice(0, 8);
+    const sorted = dedupeLocationResults(results)
+      .sort((a, b) => scoreLocationResult(b, cleanQuery, cepData) - scoreLocationResult(a, cleanQuery, cepData));
+
+    const typedApprox = createTypedApproximationResult(cleanQuery, sorted[0], cepData);
+    const hasStrongExact = sorted.some((item) => scoreLocationResult(item, cleanQuery, cepData) >= 100);
+    const output = typedApprox && !hasStrongExact ? [typedApprox, ...sorted] : sorted;
+
+    return output.slice(0, 8);
   }
 
   function renderLocationSuggestions(items) {
@@ -606,13 +731,14 @@
       const lng = toCoordinate(item.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
-      const label = getLocationDisplayName(item);
+      const label = item.original_label || getLocationDisplayName(item);
+      const displayLabel = getLocationDisplayName(item);
       const button = document.createElement("button");
       button.type = "button";
       button.className = "location-suggestion";
-      button.textContent = label;
+      button.textContent = displayLabel + (item.approximate ? "" : item.source ? " (" + item.source + ")" : "");
       button.addEventListener("click", () => {
-        selectedLocation = { local: label, lat, lng };
+        selectedLocation = { local: label, lat, lng, approximate: Boolean(item.approximate) };
         input.value = label;
         latInput.value = String(lat);
         lngInput.value = String(lng);
@@ -652,7 +778,7 @@
           const results = await searchOpenStreetMapLocations(query);
           if (requestId !== activeLocationSearchRequest) return;
           renderLocationSuggestions(results);
-          if (!results.length) suggestions.innerHTML = '<div class="location-search-status">Nenhum local encontrado. Tente colocar CEP, bairro, cidade/UF ou endereço completo.</div>';
+          if (!results.length) suggestions.innerHTML = '<div class="location-search-status">Nenhum local encontrado. Tente digitar Rua + cidade/UF, CEP, bairro ou endereço completo.</div>';
         } catch (error) {
           console.error("Erro ao buscar local:", error);
           if (requestId !== activeLocationSearchRequest) return;
@@ -1118,7 +1244,7 @@
       }
 
       if (!location.local || !hasValidCoordinates(location)) {
-        setFeedback($("#adminFeedback"), "Digite o local/CEP e selecione uma sugestão antes de salvar.", "error");
+        setFeedback($("#adminFeedback"), "Digite o local/CEP e selecione uma sugestão. Se a rua exata não aparecer, use a opção de endereço digitado com mapa aproximado.", "error");
         return;
       }
 

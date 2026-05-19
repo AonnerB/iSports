@@ -35,3 +35,8 @@ LOCAL DO EVENTO - OPENSTREETMAP
 
 Importante:
 O Nominatim publico do OpenStreetMap e indicado para baixo volume/testes. Para alto volume, use um provedor proprio ou contratado de geocoding.
+
+Atualizacao de busca de locais:
+- Busca por CEP usa ViaCEP e BrasilAPI.
+- Quando a rua exata nao existe na base OpenStreetMap, aparece a opcao "Usar endereco digitado" com mapa aproximado por bairro/cidade/CEP.
+- Resultados como Rua C-10 agora recebem prioridade sobre ruas parecidas como C-4 quando a base retornar as duas.
