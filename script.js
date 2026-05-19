@@ -462,15 +462,130 @@
   }
 
   function getLocationDisplayName(item) {
-    const name = item?.display_name || "";
+    const name = item?.display_name || item?.label || "";
     return name.replace(/, Brasil$/i, "");
   }
 
-  async function searchOpenStreetMapLocations(query) {
-    const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&countrycodes=br&q=" + encodeURIComponent(query);
-    const response = await fetch(url, { headers: { Accept: "application/json" } });
+  function normalizeCep(value) {
+    const digits = String(value || "").replace(/\D/g, "");
+    return digits.length === 8 ? digits : "";
+  }
+
+  function buildAddressFromViaCep(data) {
+    if (!data || data.erro) return "";
+    return [
+      data.logradouro,
+      data.bairro,
+      data.localidade,
+      data.uf,
+      data.cep,
+      "Brasil"
+    ].filter(Boolean).join(", ");
+  }
+
+  async function fetchViaCepAddress(query) {
+    const cep = normalizeCep(query);
+    if (!cep) return "";
+    const response = await fetch("https://viacep.com.br/ws/" + cep + "/json/", { headers: { Accept: "application/json" } });
+    if (!response.ok) return "";
+    const data = await response.json();
+    return buildAddressFromViaCep(data);
+  }
+
+  async function searchNominatim(query, options = {}) {
+    const params = new URLSearchParams({
+      format: "jsonv2",
+      addressdetails: "1",
+      limit: String(options.limit || 6),
+      q: query
+    });
+    if (options.countryCodes) params.set("countrycodes", options.countryCodes);
+
+    const response = await fetch("https://nominatim.openstreetmap.org/search?" + params.toString(), { headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error("Falha ao buscar local no OpenStreetMap.");
-    return response.json();
+    return (await response.json()).map((item) => ({ ...item, source: "OpenStreetMap" }));
+  }
+
+  async function searchPhoton(query) {
+    const params = new URLSearchParams({ q: query, limit: "8", lang: "pt" });
+    const response = await fetch("https://photon.komoot.io/api/?" + params.toString(), { headers: { Accept: "application/json" } });
+    if (!response.ok) return [];
+    const data = await response.json();
+    const features = Array.isArray(data.features) ? data.features : [];
+
+    return features.map((feature) => {
+      const props = feature.properties || {};
+      const coords = feature.geometry && Array.isArray(feature.geometry.coordinates) ? feature.geometry.coordinates : [];
+      const pieces = [
+        props.name,
+        props.street,
+        props.housenumber,
+        props.district,
+        props.city,
+        props.state,
+        props.postcode,
+        props.country
+      ].filter(Boolean);
+
+      return {
+        display_name: pieces.join(", "),
+        lat: coords[1],
+        lon: coords[0],
+        source: "Photon"
+      };
+    });
+  }
+
+  function dedupeLocationResults(items) {
+    const seen = new Set();
+    return (items || []).filter((item) => {
+      const lat = toCoordinate(item.lat);
+      const lng = toCoordinate(item.lon);
+      const label = getLocationDisplayName(item).toLowerCase();
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !label) return false;
+      const key = label + "|" + lat.toFixed(5) + "|" + lng.toFixed(5);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  async function searchOpenStreetMapLocations(query) {
+    const cleanQuery = String(query || "").trim();
+    if (!cleanQuery) return [];
+
+    const cepAddress = await fetchViaCepAddress(cleanQuery);
+    const queries = [
+      cleanQuery,
+      cepAddress,
+      cleanQuery.includes("Brasil") ? "" : cleanQuery + ", Brasil"
+    ].filter(Boolean);
+
+    const results = [];
+
+    for (const searchQuery of queries) {
+      const brResults = await searchNominatim(searchQuery, { countryCodes: "br", limit: 8 });
+      results.push(...brResults);
+      if (results.length >= 6) break;
+    }
+
+    if (results.length < 3) {
+      for (const searchQuery of queries) {
+        const globalResults = await searchNominatim(searchQuery, { limit: 8 });
+        results.push(...globalResults);
+        if (results.length >= 6) break;
+      }
+    }
+
+    if (results.length < 3) {
+      for (const searchQuery of queries) {
+        const photonResults = await searchPhoton(searchQuery);
+        results.push(...photonResults);
+        if (results.length >= 6) break;
+      }
+    }
+
+    return dedupeLocationResults(results).slice(0, 8);
   }
 
   function renderLocationSuggestions(items) {
@@ -537,7 +652,7 @@
           const results = await searchOpenStreetMapLocations(query);
           if (requestId !== activeLocationSearchRequest) return;
           renderLocationSuggestions(results);
-          if (!results.length) suggestions.innerHTML = '<div class="location-search-status">Nenhum local encontrado.</div>';
+          if (!results.length) suggestions.innerHTML = '<div class="location-search-status">Nenhum local encontrado. Tente colocar CEP, bairro, cidade/UF ou endereço completo.</div>';
         } catch (error) {
           console.error("Erro ao buscar local:", error);
           if (requestId !== activeLocationSearchRequest) return;
@@ -1003,7 +1118,7 @@
       }
 
       if (!location.local || !hasValidCoordinates(location)) {
-        setFeedback($("#adminFeedback"), "Digite o local e selecione uma sugestão do OpenStreetMap antes de salvar.", "error");
+        setFeedback($("#adminFeedback"), "Digite o local/CEP e selecione uma sugestão antes de salvar.", "error");
         return;
       }
 

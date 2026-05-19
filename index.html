@@ -67,7 +67,7 @@
             type="text"
             name="location"
             id="locationInput"
-            placeholder="Digite e selecione o endereço"
+            placeholder="Digite nome, endereço ou CEP"
             required
             minlength="5"
             autocomplete="off"
@@ -75,7 +75,7 @@
           <input type="hidden" name="locationLat" id="locationLatInput">
           <input type="hidden" name="locationLng" id="locationLngInput">
           <div id="locationSuggestions" class="location-suggestions" hidden></div>
-          <small class="field-hint">Digite o local e selecione uma sugestão do OpenStreetMap para salvar o endereço com latitude e longitude.</small>
+          <small class="field-hint">Digite nome, endereço completo ou CEP. O sistema tenta OpenStreetMap, CEP/ViaCEP e Photon.</small>
         </label>
 
         <button id="saveEventBtn" class="primary-action full-span" type="submit">Criar evento</button>
